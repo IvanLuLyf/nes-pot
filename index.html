@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>NesPot</title>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1.0, user-scalable=0">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        .game-screen-wrap {
+            display: flex;
+            justify-content: center;
+        }
+
+        .game-screen {
+            background: #ccc;
+            width: 100%;
+            max-width: 512px;
+            position: relative;
+            aspect-ratio: 16/15;
+        }
+
+        .game-entry {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 16px;
+            height: 100%;
+        }
+
+        .game-entry-btn {
+            width: 200px;
+            font-size: 24px;
+            padding: 4px;
+        }
+
+        .game-canvas {
+            display: none;
+            height: 100%;
+            width: 100%;
+            image-rendering: -moz-crisp-edges;
+            image-rendering: -webkit-crisp-edges;
+            image-rendering: pixelated;
+        }
+
+        .game-screen[data-status="run"] .game-entry {
+            display: none;
+        }
+
+        .game-screen[data-status="run"] .game-canvas {
+            display: block;
+        }
+
+        .game-controller {
+            display: none;
+        }
+
+        @media screen and (max-width: 450px) {
+            .game-controller {
+                display: grid;
+                grid-template-columns: auto auto;
+                grid-template-areas: "selection selection" "direction action";
+            }
+        }
+
+        .game-controller-d {
+            grid-area: direction;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            padding: 16px;
+        }
+
+        .game-controller-m {
+            grid-area: selection;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .game-controller-a {
+            grid-area: action;
+            display: grid;
+            align-items: center;
+            grid-template-columns: repeat(2, auto);
+            gap: 16px;
+            padding: 16px;
+        }
+
+        .game-btn {
+            border: none;
+            background: #ccc;
+        }
+
+        .game-btn:hover,
+        .game-btn:active {
+            background: #aaa;
+        }
+
+        .game-btn.game-btn-d {
+            width: 48px;
+            height: 48px;
+        }
+
+        .game-btn.game-btn-m {
+            padding: 8px;
+            border-radius: 24px;
+        }
+
+        .game-btn.game-btn-a {
+            width: 64px;
+            height: 64px;
+            border-radius: 50%;
+            font-size: 32px;
+        }
+
+        /* 新增游戏选择下拉框的样式 */
+        .game-select {
+            width: 200px;
+            height: 40px;
+            font-size: 20px;
+            padding: 4px;
+        }
+    </style>
+</head>
+<body>
+<div id="content">
+    <div class="game-screen-wrap">
+        <div id="area_game_screen" class="game-screen">
+            <div class="game-entry">
+                <!-- 游戏选择下拉框 -->
+                <label for="select_game">
+                    <select id="select_game" class="game-select">
+                        <option value="./roms/Oozumou.nes">相扑</option>
+                        <option value="./roms/Kinnikuman.nes">筋肉人摔跤</option>
+                    </select>
+                </label>
+                <!-- 玩家模式选择按钮 -->
+                <button id="btn_p1" class="game-entry-btn">1P</button>
+                <button id="btn_p1_net" class="game-entry-btn">1P (Net)</button>
+                <button id="btn_p2_net" class="game-entry-btn">2P (Net)</button>
+            </div>
+            <canvas id="emulator" class="game-canvas" width="256" height="240"></canvas>
+        </div>
+    </div>
+    <div class="game-controller">
+        <div class="game-controller-d">
+            <div></div>
+            <button class="game-btn game-btn-d" data-key="w"></button>
+            <div></div>
+            <button class="game-btn game-btn-d" data-key="a"></button>
+            <div></div>
+            <button class="game-btn game-btn-d" data-key="d"></button>
+            <div></div>
+            <button class="game-btn game-btn-d" data-key="s"></button>
+            <div></div>
+        </div>
+        <div class="game-controller-m">
+            <button class="game-btn game-btn-m" data-key="g">select</button>
+            <button class="game-btn game-btn-m" data-key="h">start</button>
+        </div>
+        <div class="game-controller-a">
+            <button class="game-btn game-btn-a" data-key="j">B</button>
+            <button class="game-btn game-btn-a" data-key="k">A</button>
+        </div>
+    </div>
+</div>
+
+<!-- 引入第三方库 -->
+<script src="https://unpkg.com/jsnes/dist/jsnes.min.js"></script>
+<script>
+    (() => {
+        // -------------------------
+        // 常量定义
+        // -------------------------
+        const KEY_MAP = {
+            w: jsnes.Controller.BUTTON_UP,
+            a: jsnes.Controller.BUTTON_LEFT,
+            s: jsnes.Controller.BUTTON_DOWN,
+            d: jsnes.Controller.BUTTON_RIGHT,
+            g: jsnes.Controller.BUTTON_SELECT,
+            h: jsnes.Controller.BUTTON_START,
+            k: jsnes.Controller.BUTTON_A,
+            j: jsnes.Controller.BUTTON_B,
+        };
+        const SCREEN_WIDTH = 256, SCREEN_HEIGHT = 240;
+        const FRAMEBUFFER_SIZE = SCREEN_WIDTH * SCREEN_HEIGHT;
+        const AUDIO_BUFFERING = 512;
+        const SAMPLE_COUNT = 4 * 1024;
+        const SAMPLE_MASK = SAMPLE_COUNT - 1;
+
+        // -------------------------
+        // 全局上下文
+        // -------------------------
+        const ctx = {
+            player: 0,
+            useNet: false,
+            nes: null,
+            network: null,
+        };
+        const urlParam = new URLSearchParams(location.search);
+
+        // -------------------------
+        // Canvas 及画面缓存
+        // -------------------------
+        const $gameScreen = document.getElementById("area_game_screen");
+        const $canvas = document.getElementById("emulator");
+        const canvasCtx = $canvas.getContext("2d");
+        let imageData, framebufferU8, framebufferU32;
+
+        // -------------------------
+        // 本地音频相关
+        // -------------------------
+        const audioSamplesL = new Float32Array(SAMPLE_COUNT);
+        const audioSamplesR = new Float32Array(SAMPLE_COUNT);
+        let audioWriteCursor = 0, audioReadCursor = 0;
+        let audioTxBuffer = []; // 传输音频的发送缓冲区（交错存储左右声道采样）
+        let audioTxIntervalId = null;
+
+        // -------------------------
+        // 远程音频相关（2P 用于播放来自 1P 的音频）
+        // -------------------------
+        let remoteAudioCtx, remoteScriptProcessor;
+        const remoteAudioSamplesL = new Float32Array(SAMPLE_COUNT);
+        const remoteAudioSamplesR = new Float32Array(SAMPLE_COUNT);
+        let remoteAudioWriteCursor = 0, remoteAudioReadCursor = 0;
+
+        // -------------------------
+        // 图像传输节流变量
+        // -------------------------
+        let lastImageSentTime = 0;
+        const IMAGE_SEND_INTERVAL = 66; // 约15fps
+
+        // -------------------------
+        // 核心功能模块
+        // -------------------------
+
+        /** 画面刷新 */
+        const renderFrame = () => {
+            window.requestAnimationFrame(renderFrame);
+            imageData.data.set(framebufferU8);
+            canvasCtx.putImageData(imageData, 0, 0);
+        };
+
+        /** 本地音频剩余采样数 */
+        const audioRemain = () => (audioWriteCursor - audioReadCursor) & SAMPLE_MASK;
+
+        /** 本地音频处理回调 */
+        const audioCallback = event => {
+            const outputBuffer = event.outputBuffer;
+            const len = outputBuffer.length;
+            if (audioRemain() < AUDIO_BUFFERING) ctx.nes.frame();
+            const dstL = outputBuffer.getChannelData(0);
+            const dstR = outputBuffer.getChannelData(1);
+            for (let i = 0; i < len; i++) {
+                const srcIdx = (audioReadCursor + i) & SAMPLE_MASK;
+                dstL[i] = audioSamplesL[srcIdx];
+                dstR[i] = audioSamplesR[srcIdx];
+            }
+            audioReadCursor = (audioReadCursor + len) & SAMPLE_MASK;
+        };
+
+        /** 初始化 NES 环境：画面、音频缓冲等 */
+        const initNesEnv = () => {
+            imageData = canvasCtx.getImageData(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+            canvasCtx.fillStyle = "black";
+            canvasCtx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+            const buffer = new ArrayBuffer(imageData.data.length);
+            framebufferU8 = new Uint8ClampedArray(buffer);
+            framebufferU32 = new Uint32Array(buffer);
+
+            const audioCtx = new window.AudioContext();
+            const scriptProcessor = audioCtx.createScriptProcessor(AUDIO_BUFFERING, 0, 2);
+            scriptProcessor.onaudioprocess = audioCallback;
+            scriptProcessor.connect(audioCtx.destination);
+        };
+
+        /** 加载 ROM 后启动 NES */
+        const bootNes = romData => {
+            ctx.nes.loadROM(romData);
+            window.requestAnimationFrame(renderFrame);
+        };
+
+        /** 从 URL 加载 ROM 数据 */
+        const loadRomFromUrl = path => {
+            initNesEnv();
+            const req = new XMLHttpRequest();
+            req.open("GET", path);
+            req.overrideMimeType("text/plain; charset=x-user-defined");
+            req.onerror = () => console.error(`加载 ${path} 失败: ${req.statusText}`);
+            req.onload = function () {
+                if (this.status === 200) {
+                    bootNes(this.responseText);
+                } else if (this.status !== 0) {
+                    req.onerror();
+                }
+            };
+            req.send();
+        };
+
+        /** 处理网络接收的文字消息（按键等） */
+        const onNetMessage = msg => {
+            if (typeof msg === "string") {
+                const [cmd, key] = msg.split(" ");
+                if (cmd === "keyup") {
+                    keyboard(ctx.nes.buttonUp, 2, key);
+                } else if (cmd === "keydown") {
+                    keyboard(ctx.nes.buttonDown, 2, key);
+                }
+            }
+        };
+
+        /** 处理网络接收的音频数据（传入的 ArrayBuffer 不含头部） */
+        const onRemoteAudioData = arrayBuffer => {
+            const floatArray = new Float32Array(arrayBuffer);
+            for (let i = 0; i < floatArray.length; i += 2) {
+                remoteAudioSamplesL[remoteAudioWriteCursor] = floatArray[i];
+                remoteAudioSamplesR[remoteAudioWriteCursor] = floatArray[i + 1];
+                remoteAudioWriteCursor = (remoteAudioWriteCursor + 1) & SAMPLE_MASK;
+            }
+        };
+
+        /** 处理网络接收的图像数据（传入的 ArrayBuffer 不含头部） */
+        const onRemoteImageData = arrayBuffer => {
+            const blob = new Blob([arrayBuffer], {type: "image/webp"});
+            const url = URL.createObjectURL(blob);
+            const img = new Image();
+            img.onload = () => {
+                canvasCtx.clearRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+                canvasCtx.drawImage(img, 0, 0);
+                URL.revokeObjectURL(url);
+            };
+            img.src = url;
+        };
+
+        /** 初始化远程音频播放（2P） */
+        const initRemoteAudio = () => {
+            remoteAudioCtx = new AudioContext();
+            remoteScriptProcessor = remoteAudioCtx.createScriptProcessor(AUDIO_BUFFERING, 0, 2);
+            remoteScriptProcessor.onaudioprocess = event => {
+                const outputBuffer = event.outputBuffer;
+                const len = outputBuffer.length;
+                const dstL = outputBuffer.getChannelData(0);
+                const dstR = outputBuffer.getChannelData(1);
+                for (let i = 0; i < len; i++) {
+                    const srcIdx = (remoteAudioReadCursor + i) & SAMPLE_MASK;
+                    dstL[i] = remoteAudioSamplesL[srcIdx] || 0;
+                    dstR[i] = remoteAudioSamplesR[srcIdx] || 0;
+                }
+                remoteAudioReadCursor = (remoteAudioReadCursor + len) & SAMPLE_MASK;
+            };
+            remoteScriptProcessor.connect(remoteAudioCtx.destination);
+        };
+
+        /** 发送图像数据：将 canvas 内容转为 WebP Blob，再转换为 ArrayBuffer，
+         * 添加标识头 0x02 表示图像数据，并通过数据通道发送
+         */
+        const sendImageFrame = () => {
+            if (ctx.network && ctx.useNet) {
+                $canvas.toBlob(blob => {
+                    blob.arrayBuffer().then(buffer => {
+                        const u8 = new Uint8Array(buffer);
+                        const combined = new Uint8Array(1 + u8.length);
+                        combined[0] = 2; // 0x02 表示图像数据
+                        combined.set(u8, 1);
+                        ctx.network.send(combined.buffer);
+                    });
+                }, "image/webp", 0.8);
+            }
+        };
+
+        /** 初始化网络连接及信令 */
+        const initNetwork = () => {
+            const ws = new WebSocket(`wss://game-ws-room.deno.dev/?room=${urlParam.get('room') || '1234'}`);
+            const rtc = {candidates: []};
+            const peerConnection = new RTCPeerConnection({
+                iceServers: [
+                    {urls: "stun:stun.l.google.com:19302"},
+                    {
+                        urls: 'turn:turn.speed.cloudflare.com:50000',
+                        username: 'b5c0effff2e56a3a317e404c6a049e62cd5d3ba825fdcd0bd853c89ebb9f1381a6847a25ba7d1d9c670b195d2b57f897816f9a32749ea452e6a080578fc2ddca',
+                        credential: 'aba9b169546eb6dcc7bfb1cdf34544cf95b5161d602e3b5fa7c8342b2e9802fb',
+                    },
+                ],
+            });
+
+            ws.onmessage = async event => {
+                const data = JSON.parse(event.data);
+                if (data.offer) {
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+                    const answer = await peerConnection.createAnswer();
+                    await peerConnection.setLocalDescription(answer);
+                    sendSignal({answer: peerConnection.localDescription});
+                    processCachedCandidates();
+                } else if (data.answer) {
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+                    processCachedCandidates();
+                } else if (data.candidate) {
+                    if (!peerConnection.remoteDescription) {
+                        rtc.candidates.push(data.candidate);
+                        return;
+                    }
+                    try {
+                        await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+                    } catch (e) {
+                        console.error('添加 ICE 候选者失败', e);
+                    }
+                }
+            };
+
+            const processCachedCandidates = () => {
+                while (rtc.candidates.length) {
+                    const candidate = rtc.candidates.shift();
+                    try {
+                        peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                    } catch (e) {
+                        console.error('处理缓存的 ICE 候选者失败', e);
+                    }
+                }
+            };
+
+            const sendSignal = message => ws.send(JSON.stringify(message));
+            peerConnection.onicecandidate = event => {
+                if (event.candidate) sendSignal({candidate: event.candidate});
+            };
+
+            // 创建数据通道，并设置 binaryType 支持 ArrayBuffer
+            const dataChannel = peerConnection.createDataChannel('chat');
+            dataChannel.binaryType = "arraybuffer";
+            dataChannel.onmessage = e => {
+                if (typeof e.data === "string") {
+                    onNetMessage(e.data);
+                } else if (e.data instanceof ArrayBuffer) {
+                    const u8 = new Uint8Array(e.data);
+                    const header = u8[0];
+                    const payload = e.data.slice(1);
+                    if (header === 1) {
+                        onRemoteAudioData(payload);
+                    } else if (header === 2) {
+                        onRemoteImageData(payload);
+                    }
+                }
+            };
+            dataChannel.onopen = () => {
+                ws.close();
+                runGame();
+                // 若为 1P 且使用网络模式，则启动音频发送定时器
+                if (ctx.player === 1 && ctx.useNet && !audioTxIntervalId) {
+                    audioTxIntervalId = setInterval(() => {
+                        if (audioTxBuffer.length > 0 && ctx.network) {
+                            const float32 = new Float32Array(audioTxBuffer);
+                            const u8 = new Uint8Array(float32.buffer);
+                            const combined = new Uint8Array(1 + u8.length);
+                            combined[0] = 1; // 0x01 表示音频数据
+                            combined.set(u8, 1);
+                            ctx.network.send(combined.buffer);
+                            audioTxBuffer = [];
+                        }
+                    }, 50);
+                }
+            };
+            dataChannel.onclose = () => console.log('Data channel closed');
+
+            peerConnection.ondatachannel = event => {
+                const receiveChannel = event.channel;
+                receiveChannel.binaryType = "arraybuffer";
+                receiveChannel.onmessage = e => {
+                    if (typeof e.data === "string") {
+                        onNetMessage(e.data);
+                    } else if (e.data instanceof ArrayBuffer) {
+                        const u8 = new Uint8Array(e.data);
+                        const header = u8[0];
+                        const payload = e.data.slice(1);
+                        if (header === 1) {
+                            onRemoteAudioData(payload);
+                        } else if (header === 2) {
+                            onRemoteImageData(payload);
+                        }
+                    }
+                };
+                receiveChannel.onopen = () => {
+                    ws.close();
+                    runGame();
+                };
+                receiveChannel.onclose = () => console.log('Data channel closed');
+            };
+
+            const createOffer = async () => {
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+                sendSignal({offer: peerConnection.localDescription});
+            };
+
+            ws.onopen = createOffer;
+
+            ctx.network = {
+                dataChannel,
+                send: message => dataChannel.send(message),
+            };
+
+            if (ctx.player === 2) {
+                initRemoteAudio();
+            }
+        };
+
+        /** 键盘按键处理封装 */
+        const keyboard = (callback, player, key) => {
+            if (key in KEY_MAP) callback(player, KEY_MAP[key]);
+        };
+
+        /** 根据玩家类型进行按键处理 */
+        const handleKeyEvent = (eventType, key) => {
+            if (ctx.player === 1) {
+                keyboard(eventType === 'keydown' ? ctx.nes.buttonDown : ctx.nes.buttonUp, 1, key);
+            } else if (ctx.player === 2) {
+                ctx.network && ctx.network.send(`${eventType} ${key}`);
+            }
+        };
+
+        // --- 以下是整合了触摸事件的部分 ---
+        const activeTouches = new Map();
+        const onTouchStart = e => {
+            e.preventDefault();
+            Array.from(e.changedTouches).forEach(touch => {
+                const targetElement = document.elementFromPoint(touch.clientX, touch.clientY);
+                if (targetElement && targetElement.classList.contains("game-btn")) {
+                    const key = targetElement.dataset.key;
+                    activeTouches.set(touch.identifier, key);
+                    handleKeyEvent('keydown', key);
+                }
+            });
+        };
+        const onTouchMove = e => {
+            e.preventDefault();
+            Array.from(e.changedTouches).forEach(touch => {
+                const key = activeTouches.get(touch.identifier);
+                if (!key) return;
+                const currentElement = document.elementFromPoint(touch.clientX, touch.clientY);
+                if (!currentElement || !currentElement.classList.contains("game-btn") || currentElement.dataset.key !== key) {
+                    handleKeyEvent('keyup', key);
+                    activeTouches.delete(touch.identifier);
+                }
+            });
+        };
+        const onTouchEndOrCancel = e => {
+            e.preventDefault();
+            Array.from(e.changedTouches).forEach(touch => {
+                const key = activeTouches.get(touch.identifier);
+                if (key) {
+                    handleKeyEvent('keyup', key);
+                    activeTouches.delete(touch.identifier);
+                }
+            });
+        };
+
+        /** 统一注册键盘与触摸事件 */
+        const bindControlEvents = () => {
+            document.addEventListener('keydown', e => handleKeyEvent('keydown', e.key));
+            document.addEventListener('keyup', e => handleKeyEvent('keyup', e.key));
+            const gameController = document.querySelector('.game-controller');
+            gameController.addEventListener('touchstart', onTouchStart);
+            gameController.addEventListener('touchmove', onTouchMove);
+            gameController.addEventListener('touchend', onTouchEndOrCancel);
+            gameController.addEventListener('touchcancel', onTouchEndOrCancel);
+        };
+
+        /**
+         * 启动游戏，更新界面状态
+         * 如果玩家为1P，则从游戏选择框中获取 ROM 路径进行加载
+         */
+        const runGame = () => {
+            $gameScreen.dataset.status = "run";
+            if (ctx.player === 1) {
+                const selectGame = document.getElementById("select_game");
+                const romPath = selectGame ? selectGame.value : "./rom";
+                loadRomFromUrl(romPath);
+            }
+        };
+
+        /**
+         * 根据玩家角色和网络需求启动游戏
+         * @param {boolean} useNet 是否启用网络
+         */
+        const startGame = useNet => {
+            ctx.useNet = useNet;
+            if (useNet) {
+                initNetwork();
+            } else {
+                runGame();
+            }
+            ctx.nes = new jsnes.NES({
+                onFrame: framebuffer_24 => {
+                    for (let i = 0; i < FRAMEBUFFER_SIZE; i++) {
+                        framebufferU32[i] = 0xFF000000 | framebuffer_24[i];
+                    }
+                    // 如果启用网络模式，则定时发送图像数据
+                    const now = performance.now();
+                    if (now - lastImageSentTime > IMAGE_SEND_INTERVAL) {
+                        sendImageFrame();
+                        lastImageSentTime = now;
+                    }
+                },
+                onAudioSample: (l, r) => {
+                    audioSamplesL[audioWriteCursor] = l;
+                    audioSamplesR[audioWriteCursor] = r;
+                    audioWriteCursor = (audioWriteCursor + 1) & SAMPLE_MASK;
+                    if (ctx.useNet && ctx.player === 1 && ctx.network) {
+                        audioTxBuffer.push(l, r);
+                    }
+                },
+            });
+        };
+
+        // -------------------------
+        // 事件绑定
+        // -------------------------
+        bindControlEvents();
+
+        document.getElementById('btn_p1').addEventListener('click', e => {
+            e.target.disabled = true;
+            ctx.player = 1;
+            startGame(false);
+        });
+        document.getElementById('btn_p1_net').addEventListener('click', e => {
+            e.target.disabled = true;
+            ctx.player = 1;
+            startGame(true);
+        });
+        document.getElementById('btn_p2_net').addEventListener('click', e => {
+            e.target.disabled = true;
+            ctx.player = 2;
+            initNetwork();
+        });
+    })();
+</script>
+</body>
+</html>
