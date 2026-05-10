@@ -8,6 +8,14 @@
     {
       "title": "筋肉人摔跤",
       "rom": "https://ivanlulyf.github.io/nes-pot/roms/Kinnikuman.nes"
+    },
+    {
+      "title": "篮球",
+      "rom": "https://ivanlulyf.github.io/nes-pot/roms/DoubleDribble.nes"
+    },
+    {
+      "title": "超级玛丽",
+      "rom": "https://ivanlulyf.github.io/nes-pot/roms/SuperMarioBros.nes"
     }
   ]
 }
