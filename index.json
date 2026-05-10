@@ -1,0 +1,13 @@
+{
+  "title": "NesPot",
+  "games": [
+    {
+      "name": "相扑",
+      "url": "https://ivanlulyf.github.io/nes-pot/roms/Oozumou.nes"
+    },
+    {
+      "title": "筋肉人摔跤",
+      "rom": "https://ivanlulyf.github.io/nes-pot/roms/Kinnikuman.nes"
+    }
+  ]
+}
